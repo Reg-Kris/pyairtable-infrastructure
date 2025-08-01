@@ -1,0 +1,343 @@
+# RBAC configurations for PyAirtable services
+# Production-ready security with least privilege principle
+
+---
+# Service Account for API services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-api-sa
+  namespace: pyairtable-api
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: api
+    app.kubernetes.io/service-account: api
+  annotations:
+    pyairtable.com/description: "Service account for API services"
+
+---
+# Service Account for AI services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-ai-sa
+  namespace: pyairtable-ai
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: ai
+    app.kubernetes.io/service-account: ai
+  annotations:
+    pyairtable.com/description: "Service account for AI/ML services"
+
+---
+# Service Account for data services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-data-sa
+  namespace: pyairtable-data
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: data
+    app.kubernetes.io/service-account: data
+  annotations:
+    pyairtable.com/description: "Service account for data services"
+
+---
+# Service Account for automation services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-automation-sa
+  namespace: pyairtable-automation
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/service-account: automation
+  annotations:
+    pyairtable.com/description: "Service account for automation services"
+
+---
+# Service Account for frontend services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-frontend-sa
+  namespace: pyairtable-frontend
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/service-account: frontend
+  annotations:
+    pyairtable.com/description: "Service account for frontend services"
+
+---
+# Service Account for monitoring
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pyairtable-monitoring-sa
+  namespace: pyairtable-monitoring
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/service-account: monitoring
+  annotations:
+    pyairtable.com/description: "Service account for monitoring services"
+
+---
+# ClusterRole for API services (limited cluster access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyairtable-api-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: api
+rules:
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRole for AI services (minimal access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyairtable-ai-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: ai
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRole for data services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyairtable-data-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: data
+rules:
+- apiGroups: [""]
+  resources: ["services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["pyairtable-config", "pyairtable-secrets"]
+
+---
+# ClusterRole for monitoring (extensive read access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyairtable-monitoring-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: monitoring
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+
+---
+# Role for automation services (namespace-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: pyairtable-automation
+  name: pyairtable-automation-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: automation
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# ClusterRoleBindings
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyairtable-api-binding
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: api
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-api-sa
+  namespace: pyairtable-api
+roleRef:
+  kind: ClusterRole
+  name: pyairtable-api-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyairtable-ai-binding
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: ai
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-ai-sa
+  namespace: pyairtable-ai
+roleRef:
+  kind: ClusterRole
+  name: pyairtable-ai-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyairtable-data-binding
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: data
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-data-sa
+  namespace: pyairtable-data
+roleRef:
+  kind: ClusterRole
+  name: pyairtable-data-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyairtable-monitoring-binding
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: monitoring
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-monitoring-sa
+  namespace: pyairtable-monitoring
+roleRef:
+  kind: ClusterRole
+  name: pyairtable-monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBindings for namespace-scoped permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pyairtable-automation-binding
+  namespace: pyairtable-automation
+  labels:
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: automation
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-automation-sa
+  namespace: pyairtable-automation
+roleRef:
+  kind: Role
+  name: pyairtable-automation-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Pod Security Policy (if enabled)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: pyairtable-psp
+  labels:
+    app.kubernetes.io/name: pyairtable
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  readOnlyRootFilesystem: true
+  seccompProfile:
+    type: RuntimeDefault
+
+---
+# ClusterRole for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pyairtable-psp-role
+  labels:
+    app.kubernetes.io/name: pyairtable
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames: ['pyairtable-psp']
+
+---
+# Bind PSP to all PyAirtable service accounts
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pyairtable-psp-binding
+  labels:
+    app.kubernetes.io/name: pyairtable
+roleRef:
+  kind: ClusterRole
+  name: pyairtable-psp-role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: pyairtable-api-sa
+  namespace: pyairtable-api
+- kind: ServiceAccount
+  name: pyairtable-ai-sa
+  namespace: pyairtable-ai
+- kind: ServiceAccount
+  name: pyairtable-data-sa
+  namespace: pyairtable-data
+- kind: ServiceAccount
+  name: pyairtable-automation-sa
+  namespace: pyairtable-automation
+- kind: ServiceAccount
+  name: pyairtable-frontend-sa
+  namespace: pyairtable-frontend
+- kind: ServiceAccount
+  name: pyairtable-monitoring-sa
+  namespace: pyairtable-monitoring

@@ -1,0 +1,513 @@
+# Network Policies for PyAirtable services
+# Zero-trust networking with secure service-to-service communication
+
+---
+# Default deny all ingress traffic policy for all namespaces
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pyairtable-api
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pyairtable-ai
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pyairtable-data
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pyairtable-automation
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pyairtable-frontend
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# API Gateway network policy - allows ingress from load balancer and egress to all services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-gateway-policy
+  namespace: pyairtable-api
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector: {}  # Allow from same namespace
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-ai
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-automation
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-frontend
+    ports:
+    - protocol: TCP
+      port: 8000
+    - protocol: TCP
+      port: 8001
+    - protocol: TCP
+      port: 8002
+    - protocol: TCP
+      port: 3000
+  - {} # Allow all egress for external API calls and DNS
+
+---
+# LLM Orchestrator network policy - allows ingress from API gateway and egress to external APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llm-orchestrator-policy
+  namespace: pyairtable-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: llm-orchestrator
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-api
+      podSelector:
+        matchLabels:
+          app: api-gateway
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    ports:
+    - protocol: TCP
+      port: 8001
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-ai
+      podSelector:
+        matchLabels:
+          app: mcp-server
+    ports:
+    - protocol: TCP
+      port: 8002
+  - {} # Allow all egress for external LLM API calls
+
+---
+# MCP Server network policy - allows ingress from LLM orchestrator and egress to data services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-server-policy
+  namespace: pyairtable-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: mcp-server
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-ai
+      podSelector:
+        matchLabels:
+          app: llm-orchestrator
+    ports:
+    - protocol: TCP
+      port: 8002
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    ports:
+    - protocol: TCP
+      port: 8000
+  - {} # Allow all egress for external Airtable API calls
+
+---
+# Airtable Gateway network policy - allows ingress from AI services and egress to external APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: airtable-gateway-policy
+  namespace: pyairtable-data
+spec:
+  podSelector:
+    matchLabels:
+      app: airtable-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-ai
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+      podSelector:
+        matchLabels:
+          app: platform-services
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-automation
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - {} # Allow all egress for external Airtable API calls
+
+---
+# Platform Services network policy - allows ingress from multiple services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-services-policy
+  namespace: pyairtable-data
+spec:
+  podSelector:
+    matchLabels:
+      app: platform-services
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-api
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-automation
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-frontend
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+      podSelector:
+        matchLabels:
+          app: airtable-gateway
+    ports:
+    - protocol: TCP
+      port: 8000
+  - {} # Allow egress to databases and external services
+
+---
+# Automation Services network policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: automation-services-policy
+  namespace: pyairtable-automation
+spec:
+  podSelector:
+    matchLabels:
+      app: automation-services
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-api
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-frontend
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    ports:
+    - protocol: TCP
+      port: 8000
+  - {} # Allow egress to external services and databases
+
+---
+# Frontend network policy - allows ingress from load balancer
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-policy
+  namespace: pyairtable-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-api
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-automation
+    ports:
+    - protocol: TCP
+      port: 8000
+  - {} # Allow egress to external CDNs and APIs
+
+---
+# Monitoring network policy - allows broad access for metrics collection
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-policy
+  namespace: pyairtable-monitoring
+spec:
+  podSelector:
+    matchLabels:
+      component: monitoring
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9090  # Prometheus
+    - protocol: TCP
+      port: 3000  # Grafana
+    - protocol: TCP
+      port: 16686 # Jaeger
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9100  # Node exporter
+    - protocol: TCP
+      port: 8080  # Application metrics
+    - protocol: TCP
+      port: 8000  # Service metrics
+    - protocol: TCP
+      port: 15090 # Istio metrics
+  - {} # Allow all egress for external integrations
+
+---
+# Database access policy - restrictive access to database ports
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-access-policy
+  namespace: pyairtable-system
+spec:
+  podSelector:
+    matchLabels:
+      component: database
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-api
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-ai
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-data
+    - namespaceSelector:
+        matchLabels:
+          name: pyairtable-automation
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Cross-namespace communication policy for service mesh
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: istio-sidecar-policy
+  namespace: pyairtable-api
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15090  # Envoy metrics
+    - protocol: TCP
+      port: 15021  # Health checks
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15010  # Pilot
+    - protocol: TCP
+      port: 15011  # Pilot
+    - protocol: TCP
+      port: 8080   # Citadel
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: istio-sidecar-policy
+  namespace: pyairtable-ai
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15090
+    - protocol: TCP
+      port: 15021
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15010
+    - protocol: TCP
+      port: 15011
+    - protocol: TCP
+      port: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: istio-sidecar-policy
+  namespace: pyairtable-data
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15090
+    - protocol: TCP
+      port: 15021
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15010
+    - protocol: TCP
+      port: 15011
+    - protocol: TCP
+      port: 8080

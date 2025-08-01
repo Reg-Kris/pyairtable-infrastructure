@@ -1,0 +1,94 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+terraform.tfplan
+tfplan
+*.tfplan.*
+
+# Local files
+.env
+.env.local
+*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Helm
+charts/*.tgz
+
+# Secret files
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+
+# AWS
+.aws/credentials
+.aws/config
+
+# Azure
+.azure/
+
+# GCP
+*.json
+!**/terraform/**/*.json
+!.github/**/*.json
+!k8s/**/*.json
+
+# Ansible
+*.retry
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test outputs
+test-results/
+coverage/

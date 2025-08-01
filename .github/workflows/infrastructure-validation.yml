@@ -1,0 +1,459 @@
+# Infrastructure Validation Pipeline
+# Comprehensive testing and monitoring of deployed infrastructure
+
+name: Infrastructure Validation
+
+on:
+  schedule:
+    # Run validation every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to validate'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      test_type:
+        description: 'Type of validation to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - basic
+          - full
+          - security
+          - performance
+  workflow_run:
+    workflows: ["Terraform Deploy"]
+    types: [completed]
+
+env:
+  AWS_REGION: us-west-2
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  # Basic infrastructure health checks
+  basic-validation:
+    name: Basic Infrastructure Validation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: validation-${{ matrix.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq postgresql-client-common postgresql-client
+
+      - name: Validate EKS Cluster
+        run: |
+          CLUSTER_NAME="pyairtable-${{ matrix.environment }}-eks"
+          
+          echo "Validating EKS cluster: $CLUSTER_NAME"
+          
+          # Update kubeconfig
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+          
+          # Check cluster status
+          kubectl cluster-info
+          
+          # Validate nodes are ready
+          NODE_COUNT=$(kubectl get nodes --no-headers | wc -l)
+          READY_NODES=$(kubectl get nodes --no-headers | grep -c " Ready ")
+          
+          echo "Total nodes: $NODE_COUNT"
+          echo "Ready nodes: $READY_NODES"
+          
+          if [ "$NODE_COUNT" -eq "$READY_NODES" ] && [ "$NODE_COUNT" -gt 0 ]; then
+            echo "✅ All nodes are ready"
+          else
+            echo "❌ Some nodes are not ready"
+            kubectl get nodes
+            exit 1
+          fi
+          
+          # Check system pods
+          echo "Checking system pods..."
+          kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded
+          
+          # Check if any pods are failing
+          FAILING_PODS=$(kubectl get pods -A --field-selector=status.phase=Failed --no-headers | wc -l)
+          if [ "$FAILING_PODS" -gt 0 ]; then
+            echo "❌ Found $FAILING_PODS failing pods"
+            kubectl get pods -A --field-selector=status.phase=Failed
+            exit 1
+          fi
+          
+          echo "✅ EKS cluster validation passed"
+
+      - name: Validate Aurora Database
+        run: |
+          CLUSTER_ID="pyairtable-${{ matrix.environment }}-aurora"
+          
+          echo "Validating Aurora cluster: $CLUSTER_ID"
+          
+          # Check cluster status
+          STATUS=$(aws rds describe-db-clusters \
+            --db-cluster-identifier $CLUSTER_ID \
+            --query 'DBClusters[0].Status' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+          
+          if [ "$STATUS" = "available" ]; then
+            echo "✅ Aurora cluster is available"
+            
+            # Get endpoint
+            ENDPOINT=$(aws rds describe-db-clusters \
+              --db-cluster-identifier $CLUSTER_ID \
+              --query 'DBClusters[0].Endpoint' \
+              --output text)
+            
+            echo "Database endpoint: $ENDPOINT"
+            
+            # Test connectivity (basic check)
+            timeout 10 bash -c "cat < /dev/null > /dev/tcp/${ENDPOINT}/5432" && \
+              echo "✅ Database port is accessible" || \
+              echo "⚠️  Database port check failed (may be due to security groups)"
+              
+          elif [ "$STATUS" = "NOT_FOUND" ]; then
+            echo "ℹ️  Aurora cluster not found - may not be deployed yet"
+          else
+            echo "❌ Aurora cluster status: $STATUS"
+            exit 1
+          fi
+
+      - name: Validate ElastiCache Redis
+        run: |
+          REPLICATION_GROUP="pyairtable-${{ matrix.environment }}-redis"
+          
+          echo "Validating Redis cluster: $REPLICATION_GROUP"
+          
+          # Check replication group status
+          STATUS=$(aws elasticache describe-replication-groups \
+            --replication-group-id $REPLICATION_GROUP \
+            --query 'ReplicationGroups[0].Status' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+          
+          if [ "$STATUS" = "available" ]; then
+            echo "✅ Redis cluster is available"
+            
+            # Get primary endpoint
+            ENDPOINT=$(aws elasticache describe-replication-groups \
+              --replication-group-id $REPLICATION_GROUP \
+              --query 'ReplicationGroups[0].NodeGroups[0].PrimaryEndpoint.Address' \
+              --output text)
+            
+            echo "Redis endpoint: $ENDPOINT"
+            
+            # Test connectivity (basic check)
+            timeout 5 bash -c "cat < /dev/null > /dev/tcp/${ENDPOINT}/6379" && \
+              echo "✅ Redis port is accessible" || \
+              echo "⚠️  Redis port check failed (may be due to security groups)"
+              
+          elif [ "$STATUS" = "NOT_FOUND" ]; then
+            echo "ℹ️  Redis cluster not found - may not be deployed yet"
+          else
+            echo "❌ Redis cluster status: $STATUS"
+            exit 1
+          fi
+
+      - name: Validate Load Balancers
+        run: |
+          echo "Validating load balancers..."
+          
+          # List load balancers with pyairtable tag
+          aws elbv2 describe-load-balancers \
+            --query 'LoadBalancers[?contains(LoadBalancerName, `pyairtable-${{ matrix.environment }}`)].{Name:LoadBalancerName,State:State.Code,Type:Type}' \
+            --output table
+          
+          # Check if any load balancers are not active
+          INACTIVE_LBS=$(aws elbv2 describe-load-balancers \
+            --query 'LoadBalancers[?contains(LoadBalancerName, `pyairtable-${{ matrix.environment }}`) && State.Code != `active`].LoadBalancerName' \
+            --output text)
+          
+          if [ -n "$INACTIVE_LBS" ] && [ "$INACTIVE_LBS" != "None" ]; then
+            echo "❌ Inactive load balancers found: $INACTIVE_LBS"
+            exit 1
+          else
+            echo "✅ All load balancers are active"
+          fi
+
+  # Security validation
+  security-validation:
+    name: Security Validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'security' || github.event.inputs.test_type == 'full' || github.event_name == 'schedule'
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: security-validation-${{ matrix.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Scout Suite
+        run: |
+          pip install scoutsuite
+
+      - name: Run AWS Security Assessment
+        run: |
+          echo "Running AWS security assessment for ${{ matrix.environment }}..."
+          
+          # Run Scout Suite for specific services
+          scout aws --no-browser \
+            --report-dir ./security-report-${{ matrix.environment }} \
+            --services ec2 rds elasticache eks iam \
+            --exceptions ./security-exceptions.json || true
+          
+          # Check for critical findings
+          if [ -f "./security-report-${{ matrix.environment }}/scoutsuite-report/inc-awsconfig/aws_config.js" ]; then
+            echo "✅ Security assessment completed"
+          else
+            echo "⚠️  Security assessment may have issues"
+          fi
+
+      - name: Validate EKS Security Settings
+        run: |
+          CLUSTER_NAME="pyairtable-${{ matrix.environment }}-eks"
+          
+          echo "Validating EKS security settings..."
+          
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+          
+          # Check Pod Security Standards
+          echo "Checking pod security policies..."
+          kubectl get podsecuritypolicy || echo "PSP not configured"
+          
+          # Check RBAC
+          echo "Checking RBAC configuration..."
+          kubectl auth can-i --list --as=system:anonymous || true
+          
+          # Check network policies
+          echo "Checking network policies..."
+          kubectl get networkpolicies -A
+          
+          # Check for privileged pods
+          PRIVILEGED_PODS=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.securityContext.privileged}{"\n"}{end}' | grep -c "true" || echo "0")
+          
+          if [ "$PRIVILEGED_PODS" -gt 0 ]; then
+            echo "⚠️  Found $PRIVILEGED_PODS privileged pods"
+            kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.securityContext.privileged}{"\n"}{end}' | grep "true"
+          else
+            echo "✅ No privileged pods found"
+          fi
+
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report-${{ matrix.environment }}
+          path: security-report-${{ matrix.environment }}/
+          retention-days: 30
+
+  # Performance validation
+  performance-validation:
+    name: Performance Validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'performance' || github.event.inputs.test_type == 'full'
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: performance-validation-${{ matrix.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check Resource Utilization
+        run: |
+          CLUSTER_NAME="pyairtable-${{ matrix.environment }}-eks"
+          
+          echo "Checking resource utilization for ${{ matrix.environment }}..."
+          
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+          
+          # Install metrics server if not present
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml || true
+          
+          # Wait for metrics server
+          sleep 30
+          
+          # Check node resource usage
+          echo "Node resource usage:"
+          kubectl top nodes || echo "Metrics not available yet"
+          
+          # Check pod resource usage
+          echo "Pod resource usage:"
+          kubectl top pods -A || echo "Metrics not available yet"
+          
+          # Check for resource-constrained pods
+          echo "Checking for resource constraints..."
+          kubectl get events -A --field-selector reason=FailedScheduling
+          
+          # Check HPA status
+          echo "HPA status:"
+          kubectl get hpa -A
+
+      - name: Database Performance Check
+        run: |
+          CLUSTER_ID="pyairtable-${{ matrix.environment }}-aurora"
+          
+          echo "Checking database performance metrics..."
+          
+          # Get recent CPU utilization
+          END_TIME=$(date -u +%Y-%m-%dT%H:%M:%S)
+          START_TIME=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S)
+          
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/RDS \
+            --metric-name CPUUtilization \
+            --dimensions Name=DBClusterIdentifier,Value=$CLUSTER_ID \
+            --start-time $START_TIME \
+            --end-time $END_TIME \
+            --period 300 \
+            --statistics Average \
+            --output table || echo "Metrics not available"
+          
+          # Check connection count
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/RDS \
+            --metric-name DatabaseConnections \
+            --dimensions Name=DBClusterIdentifier,Value=$CLUSTER_ID \
+            --start-time $START_TIME \
+            --end-time $END_TIME \
+            --period 300 \
+            --statistics Average \
+            --output table || echo "Connection metrics not available"
+
+  # Cost monitoring
+  cost-monitoring:
+    name: Cost Monitoring
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.test_type == 'full'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: cost-monitoring
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check Current Month Costs
+        run: |
+          echo "Checking current month costs..."
+          
+          # Get current month costs by service
+          START_DATE=$(date -d "$(date +%Y-%m-01)" +%Y-%m-%d)
+          END_DATE=$(date +%Y-%m-%d)
+          
+          aws ce get-cost-and-usage \
+            --time-period Start=$START_DATE,End=$END_DATE \
+            --granularity MONTHLY \
+            --metrics UnblendedCost \
+            --group-by Type=DIMENSION,Key=SERVICE \
+            --query 'ResultsByTime[0].Groups[?Metrics.UnblendedCost.Amount>`1`].[Keys[0],Metrics.UnblendedCost.Amount]' \
+            --output table
+          
+          # Get total cost
+          TOTAL_COST=$(aws ce get-cost-and-usage \
+            --time-period Start=$START_DATE,End=$END_DATE \
+            --granularity MONTHLY \
+            --metrics UnblendedCost \
+            --query 'ResultsByTime[0].Total.UnblendedCost.Amount' \
+            --output text)
+          
+          echo "Total current month cost: \$$TOTAL_COST"
+          
+          # Check if over budget threshold
+          BUDGET_THRESHOLD=600
+          if (( $(echo "$TOTAL_COST > $BUDGET_THRESHOLD" | bc -l) )); then
+            echo "⚠️  Current costs (\$$TOTAL_COST) exceed budget threshold (\$$BUDGET_THRESHOLD)"
+            echo "::warning::Monthly costs are above budget threshold"
+          else
+            echo "✅ Costs are within budget"
+          fi
+
+      - name: Forecast Next Month
+        run: |
+          echo "Generating cost forecast..."
+          
+          # Get cost forecast for next month
+          START_DATE=$(date +%Y-%m-%d)
+          END_DATE=$(date -d "$(date +%Y-%m-01) +1 month" +%Y-%m-%d)
+          
+          aws ce get-cost-forecast \
+            --time-period Start=$START_DATE,End=$END_DATE \
+            --metric UnblendedCost \
+            --granularity MONTHLY \
+            --query 'Total.Amount' \
+            --output text
+
+  # Generate validation report
+  generate-report:
+    name: Generate Validation Report
+    runs-on: ubuntu-latest
+    needs: [basic-validation, security-validation, performance-validation, cost-monitoring]
+    if: always()
+    
+    steps:
+      - name: Create Validation Report
+        run: |
+          echo "# Infrastructure Validation Report" > validation-report.md
+          echo "Date: $(date)" >> validation-report.md
+          echo "" >> validation-report.md
+          
+          echo "## Validation Results" >> validation-report.md
+          echo "- Basic Validation: ${{ needs.basic-validation.result }}" >> validation-report.md
+          echo "- Security Validation: ${{ needs.security-validation.result }}" >> validation-report.md
+          echo "- Performance Validation: ${{ needs.performance-validation.result }}" >> validation-report.md
+          echo "- Cost Monitoring: ${{ needs.cost-monitoring.result }}" >> validation-report.md
+          echo "" >> validation-report.md
+          
+          if [[ "${{ needs.basic-validation.result }}" == "success" && 
+                "${{ needs.security-validation.result }}" == "success" && 
+                "${{ needs.performance-validation.result }}" == "success" ]]; then
+            echo "## Overall Status: ✅ PASSED" >> validation-report.md
+          else
+            echo "## Overall Status: ❌ FAILED" >> validation-report.md
+          fi
+
+      - name: Upload Validation Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: validation-report.md

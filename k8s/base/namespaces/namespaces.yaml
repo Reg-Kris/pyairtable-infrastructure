@@ -1,0 +1,282 @@
+# Namespace configurations for PyAirtable services
+# Organized by service type and environment
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-system
+  labels:
+    name: pyairtable-system
+    type: system
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: system
+  annotations:
+    pyairtable.com/description: "System-level components and infrastructure services"
+    pyairtable.com/tier: "system"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-api
+  labels:
+    name: pyairtable-api
+    type: api
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: api
+  annotations:
+    pyairtable.com/description: "API services including gateway and orchestrator"
+    pyairtable.com/tier: "api"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-ai
+  labels:
+    name: pyairtable-ai
+    type: ai
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: ai
+  annotations:
+    pyairtable.com/description: "AI/ML services including LLM orchestrator and MCP server"
+    pyairtable.com/tier: "ai"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-data
+  labels:
+    name: pyairtable-data
+    type: data
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: data
+  annotations:
+    pyairtable.com/description: "Data services including Airtable gateway and platform services"
+    pyairtable.com/tier: "data"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-automation
+  labels:
+    name: pyairtable-automation
+    type: automation
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: automation
+  annotations:
+    pyairtable.com/description: "Automation and workflow services"
+    pyairtable.com/tier: "automation"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-frontend
+  labels:
+    name: pyairtable-frontend
+    type: frontend
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: frontend
+  annotations:
+    pyairtable.com/description: "Frontend applications and static assets"
+    pyairtable.com/tier: "frontend"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pyairtable-monitoring
+  labels:
+    name: pyairtable-monitoring
+    type: monitoring
+    app.kubernetes.io/name: pyairtable
+    app.kubernetes.io/component: monitoring
+  annotations:
+    pyairtable.com/description: "Monitoring, logging, and observability stack"
+    pyairtable.com/tier: "monitoring"
+
+---
+# Resource quotas for cost control
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: pyairtable-api
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "10"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: pyairtable-ai
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 24Gi
+    pods: "8"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: pyairtable-data
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "10"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: pyairtable-automation
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "6"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: pyairtable-frontend
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "6"
+
+---
+# Limit ranges for individual pods
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pod-limit-range
+  namespace: pyairtable-api
+spec:
+  limits:
+  - type: Pod
+    default:
+      cpu: 500m
+      memory: 1Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+    max:
+      cpu: "2"
+      memory: 4Gi
+    min:
+      cpu: 10m
+      memory: 64Mi
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pod-limit-range
+  namespace: pyairtable-ai
+spec:
+  limits:
+  - type: Pod
+    default:
+      cpu: "1"
+      memory: 2Gi
+    defaultRequest:
+      cpu: 200m
+      memory: 512Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+    min:
+      cpu: 50m
+      memory: 128Mi
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pod-limit-range
+  namespace: pyairtable-data
+spec:
+  limits:
+  - type: Pod
+    default:
+      cpu: 500m
+      memory: 1Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+    max:
+      cpu: "2"
+      memory: 4Gi
+    min:
+      cpu: 10m
+      memory: 64Mi
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pod-limit-range
+  namespace: pyairtable-automation
+spec:
+  limits:
+  - type: Pod
+    default:
+      cpu: 200m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 128Mi
+    max:
+      cpu: "1"
+      memory: 2Gi
+    min:
+      cpu: 10m
+      memory: 64Mi
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pod-limit-range
+  namespace: pyairtable-frontend
+spec:
+  limits:
+  - type: Pod
+    default:
+      cpu: 200m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 128Mi
+    max:
+      cpu: "1"
+      memory: 2Gi
+    min:
+      cpu: 10m
+      memory: 64Mi
